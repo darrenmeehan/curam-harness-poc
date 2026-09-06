@@ -281,9 +281,15 @@ def main():
             )
 
     print_table(results)
-    out = WORKROOT / "results.json"
+    # accumulate across invocations (running --task one at a time must not
+    # clobber prior results); the runs/ dir keeps one file per run
+    runs_dir = ROOT / "eval_runs"
+    runs_dir.mkdir(exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    out = runs_dir / f"results-{stamp}.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"\nwrote {out}")
+    (runs_dir / "results-latest.json").write_text(json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":

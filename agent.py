@@ -452,9 +452,14 @@ def load_config(path: str | Path = "curam.toml") -> dict:
             cfg = tomllib.load(f)
     except FileNotFoundError:
         raise FileNotFoundError(
-            f"config not found: {p} — run from curam-poc/ or pass --config"
+            f"config not found: {p} — run from the harness dir or pass --config"
         ) from None
     cfg.setdefault("workdir", ".")
+    # a RELATIVE workdir resolves against the config's own dir (the repo
+    # root), not the shell cwd — so curam works the same from anywhere.
+    workdir = cfg["workdir"]
+    if workdir and not Path(workdir).is_absolute():
+        cfg["workdir"] = str((Path(p).resolve().parent / workdir).resolve())
     cfg.setdefault("policy", {"rules": {}})
     if "rules" not in cfg["policy"]:
         cfg["policy"]["rules"] = {}

@@ -1,13 +1,23 @@
-# curam POC — prove the risky bits, throw it away
+# curam harness — a zero-trust coding agent harness
 
-Throwaway Python proof-of-concept for the curam design (see
-`../docs/curam.md` + `../docs/curam-slos.md`). The three questions it
-answers:
+Standalone repository for the curam harness. See **INSTALL.md** for setup +
+quickstart, `docs/` for the design (vision, decisions, SLOs, skills).
 
+The POC proved the risky bits:
 1. Can an LLM do real work through these tools **with a shell**? (fluency)
 2. Can we tell **when to ask the human**, calibrated so asks are rare and
    outcome-changing?
-3. Does the two-stage classifier catch the ugly stuff in practice?
+3. Does the two-stage classifier + sanitizer + policy catch the ugly stuff?
+
+**Status:** POC (Python, stdlib-only) — working, eval'd, and instrumented.
+Full TUI, network firewall, sandbox (bwrap/landlock), typed `run`-only exec,
+and the Rust rewrite are the deferred roadmap (see `docs/curam.md`).
+
+```bash
+# quickstart
+python3 curam.py "Say hello"
+python3 curam.py report        # how a session actually performed
+```
 
 Not production. No sandbox — that's phase 2 on purpose.
 
@@ -27,6 +37,8 @@ Not production. No sandbox — that's phase 2 on purpose.
 | `provider.py` | one OpenAI-compatible client (urllib) |
 | `eval_corpus.py` | offline eval — 8 scenarios, PASS/FAIL + SLI tally |
 | `skills.py` | skill loading/progressive-disclosure, lint, metrics |
+| `curam.py` | CLI entrypoint: REPL + report/eval/tasks commands |
+| `report.py` | o11y: per-session evaluation report from the journal |
 | `curam.toml` | per-project config (TOML, stdlib `tomllib`) |
 
 Each file ends with a `python3 <file>.py` self-check. All stdlib, no deps.
