@@ -3,7 +3,8 @@
 Standalone repository for the curam harness. See **INSTALL.md** for setup +
 quickstart, `docs/` for the design (vision, decisions, SLOs, skills).
 
-The POC proved the risky bits:
+The POC proved the risky bits (full record + security findings in
+[`docs/curam-evals.md`](docs/curam-evals.md)):
 1. Can an LLM do real work through these tools **with a shell**? (fluency)
 2. Can we tell **when to ask the human**, calibrated so asks are rare and
    outcome-changing?
