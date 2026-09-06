@@ -9,7 +9,42 @@
   - [Ollama](https://ollama.com) — local, free (set `default_provider = "ollama"`)
   - LiteLLM / vLLM / llama.cpp — any `/v1/chat/completions` server
 
-## Install (2 ways)
+## Install
+
+### A. uv (recommended — installs a real `curam` binary, works from any dir)
+
+```bash
+cd ~/code/curam/curam-harness
+uv tool install .
+# -> Installed executable: curam
+```
+
+Now `curam` is on your PATH and usable from any directory. The **current
+directory is always the workdir** — no config needed:
+
+```bash
+cd /some/project
+curam "Add a --dry-run flag and a test for it"
+```
+
+### B. Run in place (dev checkout — needs the eval corpus)
+
+```bash
+cd ~/code/curam/curam-harness
+python3 curam.py            # or: python3 ui.py
+```
+
+Lets you run the offline evals (`curam eval`, `curam tasks`) which are NOT
+shipped with the installed wheel — they live in the repo checkout only.
+
+### Reinstall after changes (dev loop)
+
+```bash
+cd curam-harness
+uv build && uv tool install dist/*.whl --force
+```
+
+
 
 ### A. Run in place (zero install)
 

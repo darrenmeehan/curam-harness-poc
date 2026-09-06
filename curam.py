@@ -21,55 +21,61 @@ import argparse
 import json
 import subprocess
 import sys
-import runpy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="curam harness CLI")
-    ap.add_argument("--config", default=str(ROOT / "curam.toml"))
-    ap.add_argument("--db", default=None)
-    sub = ap.add_subparsers(dest="cmd")
+    argv = sys.argv[1:]
 
-    p_report = sub.add_parser(
-        "report", help="performance report from the session journal"
-    )
-    p_report.add_argument(
-        "--since", default=None, help="only sessions in the last N (2h/30m/1d)"
-    )
-    p_report.add_argument("--json", action="store_true", help="emit JSON")
+    # strip global flags so ui (the task runner) sees them too; but first
+    # check whether this is a curam-level command
+    cmd = argv[0] if argv else None
 
-    sub.add_parser("eval", help="run the offline eval corpus")
-    sub.add_parser("tasks", help="list eval tasks")
+    if cmd in ("report", "eval", "tasks"):
+        return _run_command(cmd, argv[1:])
 
-    args, _rest = ap.parse_known_args()
+    # otherwise: interactive REPL / one-shot task → ui handles it with its
+    # own argparse (task text, --config, --db, --sli, --jsonl, --quiet)
+    import ui
+    return ui.main()
 
-    if args.cmd == "report":
-        from report import render_report
-        print(
-            render_report(
-                config=args.config, db=args.db, since=args.since, as_json=args.json
-            )
-        )
+
+def _run_command(cmd: str, rest: list[str]) -> int:
+    from report import render_report
+
+    if cmd == "report":
+        p = _report_parser()
+        args = p.parse_args(rest)
+        print(render_report(config=args.config, db=args.db, since=args.since,
+                            as_json=args.json))
         return 0
-
-    if args.cmd == "eval":
+    if cmd == "eval":
         return subprocess.call([sys.executable, str(ROOT / "eval_corpus.py")])
-
-    if args.cmd == "tasks":
-        m = json.loads((ROOT / "eval_tasks" / "manifest.json").read_text())
+    if cmd == "tasks":
+        manifest = ROOT / "eval_tasks" / "manifest.json"
+        if not manifest.exists():
+            print("eval_tasks not shipped with the installed package — "
+                  "run `curam tasks` from the repo checkout")
+            return 1
+        m = json.loads(manifest.read_text())
         for t in m:
-            print(
-                f"  {t['name']:<20} {t['kind']:<10} "
-                f"expect_ask={t.get('expect_ask', False)}"
-            )
+            print(f"  {t['name']:<20} {t['kind']:<10} "
+                  f"expect_ask={t.get('expect_ask', False)}")
         return 0
+    return 1
 
-    # default: ui REPL / one-shot
-    runpy.run_path(str(ROOT / "ui.py"), run_name="__main__")
-    return 0
+
+def _report_parser():
+    import argparse
+    p = argparse.ArgumentParser(prog="curam report")
+    p.add_argument("--config", default=str(ROOT / "curam.toml"))
+    p.add_argument("--db", default=None)
+    p.add_argument("--since", default=None,
+                   help="only sessions in the last N (2h/30m/1d)")
+    p.add_argument("--json", action="store_true")
+    return p
 
 
 if __name__ == "__main__":

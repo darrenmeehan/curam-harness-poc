@@ -7,3 +7,6 @@ eval_runs/
 
 # ruff caches deep in eval fixtures
 **/.ruff_cache/
+*.egg-info/
+dist/
+build/

@@ -1,3 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "curam-harness"
+version = "0.1.0"
+description = "Zero-trust coding agent harness (POC) - run an LLM coding agent safely with journaling, policy, skills and cost control."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+curam = "curam:main"
+
+[tool.setuptools]
+py-modules = [
+  "agent", "ask", "budget", "build_corpus", "classify",
+  "curam", "eval_corpus", "journal", "policy", "provider",
+  "report", "run_eval", "sanitize", "skills", "tools", "ui",
+]
+
 # POC is a flat script directory: Python puts the script's directory on
 # sys.path at runtime, so sibling modules ("journal", "policy", ...) resolve
 # without a package. With a pyproject.toml present, pyright treats this folder

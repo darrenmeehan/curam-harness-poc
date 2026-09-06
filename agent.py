@@ -131,10 +131,10 @@ class Agent:
         self.on_event: Callable[[str, dict], None] | None = on_event
 
         # skills: load once, advertise name+desc, load bodies on demand
-        self.skills_dir = Path(str(cfg.get("workdir") or ".")) / str(
+        self.skills_dir = self.workdir / str(
             (cfg.get("agent") or {}).get("skills_dir") or "skills"
         )
-        self.evals_dir = Path(str(cfg.get("workdir") or ".")) / "evals"
+        self.evals_dir = self.workdir / "evals"
         self.skills = skillsmod.load_skills(self.skills_dir)
         self._lint_skills(cfg)
         self.messages: list[dict] = [
@@ -445,21 +445,59 @@ class Agent:
         return toolmod.run(self.workdir, name, args)
 
 
-def load_config(path: str | Path = "curam.toml") -> dict:
-    p = Path(path)
-    try:
-        with open(p, "rb") as f:
-            cfg = tomllib.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(
-            f"config not found: {p} — run from the harness dir or pass --config"
-        ) from None
+DEFAULT_CONFIG = {
+    "default_provider": "openrouter",
+    "providers": {
+        "openrouter": {
+            "base_url": "https://openrouter.ai/api/v1",
+            "model": "deepseek/deepseek-v4-flash",
+            "api_key_env": "OPENROUTER_API_KEY",
+            "context_window": 1000000,
+            "reasoning_effort": "high",
+        },
+    },
+    "budget": {
+        "cap_usd": 0.20,
+        "price_per_mtok": {"deepseek/deepseek-v4-flash": 0.10},
+    },
+    "pii": {"level": "deterministic", "placeholder": "{REDACTED}"},
+    "policy": {"rules": {"allow": [], "ask": [], "deny": []}},
+    "classifier": {"enabled": False, "model": ""},
+    "ui": {"show_thinking": True, "show_commands": True},
+    "agent": {},
+    "workdir": ".",
+}
+
+
+def find_config(path: str | Path | None = None) -> Path | None:
+    """Locate a config: explicit path > ./curam.toml (cwd) > shipped file."""
+    if path:
+        p = Path(path)
+        return p if p.exists() else None
+    cwd_cfg = Path.cwd() / "curam.toml"
+    if cwd_cfg.exists():
+        return cwd_cfg
+    shipped = Path(__file__).resolve().parent / "curam.toml"
+    return shipped if shipped.exists() else None
+
+
+def load_config(path: str | Path | None = None) -> dict:
+    """Load config, falling back to embedded defaults when no file exists
+    (so an installed `curam` works with zero configuration output)."""
+    cfg_candidate = find_config(path)
+    if cfg_candidate is None:
+        import copy
+
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+    else:
+        try:
+            with open(cfg_candidate, "rb") as f:
+                cfg = tomllib.load(f)
+        except FileNotFoundError:
+            import copy
+
+            cfg = copy.deepcopy(DEFAULT_CONFIG)
     cfg.setdefault("workdir", ".")
-    # a RELATIVE workdir resolves against the config's own dir (the repo
-    # root), not the shell cwd — so curam works the same from anywhere.
-    workdir = cfg["workdir"]
-    if workdir and not Path(workdir).is_absolute():
-        cfg["workdir"] = str((Path(p).resolve().parent / workdir).resolve())
     cfg.setdefault("policy", {"rules": {}})
     if "rules" not in cfg["policy"]:
         cfg["policy"]["rules"] = {}

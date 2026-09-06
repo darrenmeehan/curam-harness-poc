@@ -61,6 +61,18 @@ def _context_fill(messages: list[dict]) -> int:
     return total // 4
 
 
+def _default_config() -> str:
+    """Locate curam.toml: --config flag > ./curam.toml (cwd, project-level) >
+    the file shipped next to this module (repo checkout / wheel data)."""
+    cwd_toml = Path.cwd() / "curam.toml"
+    if cwd_toml.exists():
+        return str(cwd_toml)
+    shipped = Path(__file__).resolve().parent / "curam.toml"
+    if shipped.exists():
+        return str(shipped)
+    return str(cwd_toml)  # let load_config fall back to embedded defaults
+
+
 def _show_flags(cfg: dict, quiet: bool) -> tuple[bool, bool]:
     ui = cfg.get("ui") or {}
     show_t = not quiet and bool(ui.get("show_thinking", True))
@@ -185,7 +197,7 @@ def sli_summary(journal: Journal) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description="curam POC")
-    ap.add_argument("--config", default=str(Path(__file__).parent / "curam.toml"))
+    ap.add_argument("--config", default=_default_config())
     ap.add_argument("--db", default=None)
     ap.add_argument("--sli", action="store_true", help="print journal summary and exit")
     ap.add_argument(
