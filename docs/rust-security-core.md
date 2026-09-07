@@ -156,6 +156,14 @@ curam.md is *implemented*; S6 is the deepest layer and can be scoped later.
 
 ---
 
+## Interfaces & licensing are in the companion doc
+
+Data sources (uBO/Pi-hole usefulness + gaps), the IPC plan (Unix sockets +
+versioned wire protocol, not HTTP), and the open-source-first design
+principles (licensing, `proto/` contracts, provable verdicts, lists-as-data)
+live in **`docs/data-ipc-opensource.md`**. The S0–S6 build order below is
+unchanged; that doc fixes the contracts between the pieces.
+
 ## 5. What we deliberately keep out of Rust (the restraint)
 
 - The agent loop, journal, budget, skills, UI → stay Python (frozen).
