@@ -103,6 +103,8 @@ later*, not a wait-for-someone-else thing.
 
 ## 3. Libraries — options per layer (simple first)
 
+Full rationale per crate + the finalized dependency set → `docs/rust-libraries.md`. The architecture + API contracts (classify/match_host/check_pkg verdicts, curam-run ndjson, lists-on-disk) + the T1–T7 test matrix → `docs/architecture.md` (mermaid).
+
 ### Build / bindings
 | Option | Notes |
 | --- | --- |
