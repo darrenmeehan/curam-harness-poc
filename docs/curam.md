@@ -192,6 +192,23 @@ Note: POC measured the failure precisely (that was its job); the fix ships
 with the Rust sandbox. Open question: curate upstream vs fork-diff — see
 Open Questions.
 
+### Rust strategy — security core only, not a rewrite (decided)
+
+The POC is proven and **frozen** — we stop polishing Python because polish
+would be lost in a rewrite. Rust builds ONLY the security layers, used from
+the Python harness:
+
+- `curamsec`: a PyO3 (maturin) in-process module — policy automaton,
+  injection/secret scanning, hostname/path allow-deny tries (uBlock
+  Origin-style: flat arrays + trie), OSV/RustSec package-vuln check.
+- `curam-run`: a standalone cage wrapper (extrasafe/Landlock/bwrap/
+  systemd-run) that replaces raw `subprocess` for shell.
+
+Full design + library options + Open-source data sources (StevenBlack,
+URLhaus, OSV, RustSec, detect-secrets, injection datasets) →
+`docs/rust-security-core.md`. Build order S0–S6; S2 is *the injection gap
+fix* (exec-of-repo-file ⇒ ask), S4 implements the firewall decision.
+
 ### Deferred / cut from original notes
 
 - eBPF/aya kernel-level audit: real cost, duplicated job. curam writes the
