@@ -76,8 +76,19 @@ default.
 - TOML parse of `curam.toml`: `toml` crate (or keep config Python-side and
   pass a plain JSON blob cross-language — simpler).
 - DNS: **no crate** — see B.
-- Concurrency: default OS threads / stdlib. No tokio dependency for the
-  security core (it's not a server).
+- Concurrency / async: **no tokio**. curamsec does zero I/O (pure
+  matching), curam-run manages ONE child (two std::thread pipe-readers,
+  ~30 lines). tokio is a runtime for *servers* — adding it to a library +
+  one-process wrapper is a runtime with nothing to run, plus the
+  **PyO3↔async-runtime boundary footgun** (driving a tokio runtime from
+  inside the Python GIL needs block_on/scope wrappers — exactly the 3am
+  complexity) and ~100+ transitive deps of extra supply-chain surface.
+  **When tokio enters:** the moment a *server-shaped* artifact appears —
+  the phone-bridge HTTP surface / a daemon a second consumer wants. That
+  is a NEW crate (`curamd`), tokio+axum then, and the `proto/` contracts
+  are transport-agnostic so nothing done now precludes it. Rule of
+  thumb: reach for tokio when a component serves *N concurrent
+  connections*, not before.
 
 ---
 

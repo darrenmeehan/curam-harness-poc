@@ -88,9 +88,10 @@ defaults to **ask** — deny lists can only *add* denials.
 | Child mgmt | **sandbox_command** | routes child through the sandbox, leaves IO to us |
 | CLI | **clap**; config via plain JSON from Python | few args; no TOML dep needed |
 | DNS | **none — no hickory** | we match *requested hostnames*, not IPs; system resolver is ground truth. See §5. |
-| Async | **none** | not a server; stdlib threads |
+| Async | **none** — tokio/axum only when a server artifact appears (phone-bridge daemon); contracts stay transport-agnostic | not a server; stdlib threads; see rust-libraries.md |
 
-**Deliberately cut:** hickory/trust-dns, tokio, eBPF/aya, Wasm tier,
+**Deliberately cut:** hickory/trust-dns, eBPF/aya, Wasm tier,
+
 bloom (only if >100k entries), processkit (escalator only), TUF machinery
 (a monotonic `rev` suffices).
 
