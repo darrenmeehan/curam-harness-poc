@@ -102,6 +102,10 @@ fragments while running, result closes the id. Versioned: envelope carries
 ```
 
 `list.json`: `{source_url, license, etag, sha256, refreshed_at, entries}`.
+
+> **IP/country blocking** (e.g. "all of Russia"): enforces at the cage's
+> network boundary via nftables/ipset sets (system tooling), NOT in the
+> resolve/match path. See rust-libraries.md § H.
 Anything not in `allow/` defaults to `ask` in the cage — deny lists can
 only *add* denials, never the reverse.
 

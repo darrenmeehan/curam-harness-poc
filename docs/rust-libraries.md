@@ -48,7 +48,10 @@ contract is the result struct.
 
 | | |
 |---|---|
-| **hickory-resolver** | in-process DNS (recursive, /etc/resolv.conf) — we do **not** need this: the POC matches the *requested hostname*, not the IP resolution, and `getaddrinfo` via stdlib is fine. Cut it. |
+| **hickory-resolver** | in-process DNS (recursive, /etc/resolv.conf). We do **not** use it — see "IP / country blocking" below for why. Cut it. |
+| |
+|---|---|
+| **IP / country blocking** (e.g. *block all of Russia*) | This is **not** a resolver question. Country/CIDR sets — 100k–1000k ranges — are enforced at the *network boundary* (nftables/ipset `geo-nft`/`ipset-country`), *never* in the match path. So the harness still matches hostnames only; the cage's egress netns carries the geo-set. See below. |
 
 ---
 
@@ -107,3 +110,41 @@ pieces that justify Rust here are the trie/automaton (B), the boundaries
 
 That last one is the important open-source property: the contract is testable
 by someone who doesn't use our stack.
+
+
+## H. IP / country blocking lives at the network boundary, not the resolver
+
+**(Semi-)Question: "should we use hickory? what if we block IPs — e.g. all of Russia?"**
+
+Answer: **no hickory** — and country blocking is a *separate layer* from DNS.
+
+### Why we don't put it in the app's DNS path
+
+- Country sets are 100k–1M CIDR ranges (Russia alone ≈ 15k blocks). Matching
+  those *per request in the harness* is slow and pointless — the kernel does
+  it (nftables `set`/`ipset` indexed, O(1)-ish) in the cage's netns.
+- Even if we resolved + checked in-process, there's a **TOCTOU gap**: the
+  verdict happens at request time, but the *actual* connection happens
+  later — the app could re-resolve. The kernel enforces *the* connection.
+- The `getaddrinfo` the child actually uses is the system resolver; hickory's
+  in-process resolver is one more place to drift from reality.
+
+### What we DO put in
+
+| Layer | Where | What it blocks | Notes |
+|---|---|---|---|
+| `curam-run` cage (bwrap `--unshare-net` + netns) | **network boundary** | country/IP *sets* | `geo-nft`/`ipset-country` pull ipdeny/ipverse ranges → nftables set. ipset is the tool; the crate is not involved. |
+| `curamsec.match_host()` | in-process, pre-connect | hostname *reputation* (StevenBlack, URLhaus, allow-list) | stays string-only — no DNS, no IPs. |
+
+So: `block Russia` = an nftables/ipset rule on the cage's netns; the harness
+still only matches hostnames. **Nothing to do in Rust** — this is system
+tooling, not curamsec. Documented in architecture.md § 2c.
+
+### OSS-license caveat on the *data* (for "open-source this later")
+
+- **MaxMind GeoLite2** is *free* but requires registering + acceptance of
+  GeoLite EULA; **not redistributable** in the db → cannot be vendored into
+  an OSS repo.
+- **DB-IP Lite** (CC BY 4.0) and **IP2Location LITE** (attribution) are the
+  permissive picks for shipping a country feed with the project.
+- Curam only *feeds the CIDR source* to nftables; we don't ship the db.
