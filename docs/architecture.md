@@ -101,7 +101,7 @@ fragments while running, result closes the id. Versioned: envelope carries
   allow/           (list.json + hosts)     # ours — the dev-infra allowlist
 ```
 
-`list.json`: `{source_url, license, etag, sha256, refreshed_at, entries}`.
+`list.json`: `{source_url, license, etag, sha256, refreshed_at, rev, entries}` — `rev` is monotonic for rollback-proofing; all feed-pull security (pin + hash verify + atomic swap + load-time verify + signing) is in `data-ipc-opensource.md` §4.
 
 > **IP/country blocking** (e.g. "all of Russia"): enforces at the cage's
 > network boundary via nftables/ipset sets (system tooling), NOT in the

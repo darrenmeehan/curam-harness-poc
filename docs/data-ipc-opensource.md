@@ -151,6 +151,83 @@ every list as a *versioned, auditable input* — not ground truth.
 
 ---
 
+## 4. Securing the feed pull (ingestion threat model)
+
+Most feeds **cannot** sign their own content (StevenBlack = git repo,
+URLhaus = plain CSV, OSV = aggregate API). So "secure the pull" is a layered
+story, not a single signature:
+
+### Threat model
+
+| Attacker | Can do | Our blunt |
+| --- | --- | --- |
+| MITM / DNS hijack on the way down | serve a swapped list | HTTPS + **content hash** (don't trust the pipe) |
+| feed host itself compromised | serve a swapped list (with a valid cert) | **pin a version + mirror + sign** the snapshot; never trust live upstream |
+| local tamper of our cache | replace a stored list | **verify at load, not only at fetch** |
+| rollback (replay an older *good* list) | re-enable a known-bad host / drop a fix | **monotonic** `rev`/timestamp in the manifest |
+
+### The controls, in the order that matters
+
+1. **PIN a version, don't poll live.** `curam lists update` targets a
+   **pinned snapshot** (`source repo@commit` / mirror `@rev`), not `HEAD`.
+   Bumping the pin is a deliberate, reviewable step — the "refresh" that
+   uBO/Pi-hole do automatically is done here by an explicit `curam lists
+   update <list>` after we look at the upstream diff. This single change
+   kills the "feed host compromised" row.
+2. **Content-addressing + hash verify.** `list.json` already carries
+   `sha256`; the updater fetches into a *staging* dir, verifies the hash
+   against the manifest, then **atomically swaps** (rename) into place.
+   A half-downloaded or tampered list never becomes visible.
+3. **Sign the mirror, not the upstream.** We can't force upstream to sign,
+   but *we* sign the pinned snapshot manifest with a curam project key
+   (age/minisign/SSH). The jar is now "trust TLS to reach our mirror +
+   trust our signature over the snapshot" — narrower than "trust the whole
+   feed host forever."
+4. **Verify at load, not only at fetch.** `curamsec` checks the on-disk
+   `list.json` hash+signature every time it loads a list. Covers offline
+   use and local cache tamper.
+5. **Rollback proof.** Manifest has a monotonic `rev`; a loaded list with a
+   `rev` ≤ the last seen is rejected (a real TUF-style anti-rollback, one
+   integer, no TUF machinery).
+6. **The asymmetry that simplifies everything** (from data-ipc §1):
+   the **allow list is the high-value target** (it *grants* a host/path
+   reachability); the **deny lists are low-value** (worst case a DoS). So:
+   - **allow/** → highest trust: signed per-release, pinned in-repo,
+     updated only via release (reviewed, mirrored). Never auto-refreshed.
+   - **deny/ feeds** (StevenBlack, URLhaus, gitleaks, injection signals) →
+     pinned snapshot + hash; a tampered deny can only *add* denials, and
+     "ask on unknown" means it can never silently *grant*.
+   This is why the "allow always wins / unknown ⇒ ask" default is not just
+   semantics — it's the security property that makes unsigned community
+   deny-feeds *safe to consume*.
+7. **The updater's own supply chain.** The tool that pulls feeds, and its
+   build (maturin wheel, deps), ships via a **pinned Nix flake** — the same
+   lesson as the pi/npm audit (your nix-config pin/hash). Update the
+   updater by bumping the lock, not `pip install --upgrade`.
+
+### Where keys live / a caveat
+
+- Signing key for curam snapshots: **age key held out-of-band** (not on the
+  24/7 agent box), so a local compromise of the harness can't re-sign a
+  tampered snapshot. If the key is on the same box as the agent, signatures
+  protect the *transport/mirror*, not a root-level local attacker — be
+  honest about that in the threat model.
+- Default posture, no keys configured: **pin + hash + monotonic rev +
+  load-time verify** still apply and already defeat MITM, feed-host
+  compromise, cache tamper, and rollback. Signatures are the *optional add*
+  for the mirror story. Build the pinned+hashed+monotonic core first; sign
+  the mirror when we publish public feeds.
+
+### Minimum → later ladder
+- **Minimum (ship S0–S4):** pin + sha256 verify + atomic swap + load-time
+  verify + monotonic rev. No new infra.
+- **Later (publishing our mirror):** project signing key for snapshot
+  manifests; TUF-style minimal if we ever become a *directory* of feeds.
+- **Never:** auto-refresh deny lists at PAR with no pin (the very thing we
+  just rejected — that is the uBO/Pi-hole default we're deliberately NOT
+  copying).
+
+---
 ## 4. Net mapping back to the plan
 
 | question | answer |
