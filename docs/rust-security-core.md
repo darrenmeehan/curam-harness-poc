@@ -1,183 +1,222 @@
-# curam — Rust Security Core (used from the Python harness)
+# curam — Rust Security Core: the Plan
 
-**Decision (recorded):** stop polishing the Python POC — its job is proven.
-Do NOT rewrite it in Rust wholesale. Instead build the *security layers* in
-Rust and have the Python harness call them. Rust earns its place exactly
-where the Python version is weakest and where its ecosystem is strongest:
+**Status:** planning complete; **S0 is the next executable step**.
+**Decision (recorded in curam.md):** stop polishing the Python POC — its job
+is proven. Do NOT rewrite the whole harness in Rust. Build only the
+*security layers* in Rust and have the Python harness call them.
 
-- process sandboxing (extrasafe / Landlock / bwrap / seccomp)
-- fast matching over big blocklists (uBlock-Origin-style engine)
-- egress enforcement (the injection gap is fundamentally a *boundary* gap)
-
-Everything else (agent loop, journal, budget, skills, UI) stays Python.
-The Python harness is frozen for features; it only gains *call sites* into
-the security core.
+This is the single plan. Deep rationale per topic lives in the companion
+docs (linked per section); this file is what you implement from.
 
 ---
 
-## 0. The two Rust artifacts (two answer the "how do we use it" question)
+## 0. Why Rust at all (and only here)
+
+Python is weakest / Rust is strongest in exactly three places:
+
+- process sandboxing (the *boundary*)
+- fast matching over big blocklists (uBlock-style engine)
+- egress enforcement (the injection gap is fundamentally a boundary gap)
+
+Everything else (agent loop, journal, budget, skills, UI) stays Python,
+frozen for features — it only gains *call sites* into the security core.
+
+## 1. The two artifacts
 
 | Artifact | Kind | What it does | How Python uses it |
 | --- | --- | --- | --- |
-| `curamsec` | PyO3 module (abi3) | in-process: classify commands, scan contexts for injection/secrets, match hostname/path against allow/deny tries, check a dependency against vuln DBs | `from curamsec import classify, scan, match_host, check_pkg` — milliseconds, no IPC |
-| `curam-run` | standalone binary | the sandboxed exec wrapper: runs a command inside a cage (bwrap user-ns OR `systemd-run --user` + Landlock/seccomp) with network deny/allow | Python replaces `subprocess.run("bash -c …")` with `curam-run --allow-net=… -- bash -c …` |
+| `curamsec` | PyO3 module (abi3, maturin) | in-process: `classify`, `scan_context`, `match_host`, `check_pkg` | `from curamsec import classify, …` — milliseconds, no IPC |
+| `curam-run` | standalone binary | sandboxed exec: cage (bwrap), network on/off, country/IP sets | `curam-run --net=allow:github.com -- bash -c …` — ndjson over stdio |
 
-In-process matching = the uBlock engine (fast, low latency). Out-of-process
-wrapper = the *boundary* (a cage is a process, not a library).
+**Line drawn deliberately:** `curamsec` is a *library* (no daemon, no
+sockets, no transport — minimum surface). `curam-run` is the only thing
+that touches a sandbox/network boundary; its contract is ndjson so any
+language can drive it. In-process matching = the uBO engine; out-of-process
+wrapper = the boundary (a cage is a process, not a library).
 
----
+**Architecture + mermaid:** `docs/architecture.md` (also rendered
+`docs/img/architecture.svg`).
 
-## 1. The uBlock-Origin model, mapped onto curam
+## 2. The contracts (the seams that must not move)
 
-### How uBO does it (the pattern to copy)
+### Python ↔ curamsec (PyO3, in-process)
 
-- **Static Network Filtering Engine (SNFE)**: filter *lists* (EasyList, …
-  thousands of rules) compiled into **flat arrays + a trie**. Evaluating a
-  candidate URL against 100k+ rules is a trie walk, not a regex scan —
-  microseconds.
-- **Layer semantics**: `allow` (hardcoded defaults) < `block` (filter
-  rules) < **exception** rules (`@@||…`) that un-block. Lists refresh
-  independently (uBO's "filter lists" updater).
+```python
+classify(cmd: str, *, allow_rules: list[str] | None = None) -> Verdict
+scan_context(text: str) -> list[Finding]
+match_host(host: str, *, allow: bool = False) -> Verdict
+check_pkg(name: str, version: str | None) -> list[Advisory]
 
-### The curam translation
-
-| uBO concept | curam concept |
-| --- | --- |
-| filter lists | allow/deny *host* lists; skill/repo signature lists; package vuln lists |
-| trie + flat arrays | Rust trie over hostname suffixes + `aho-corasick` automaton for signatures |
-| `@@` exception = always-allow | explicit `allow` list (git hosts, registries, build infra) is *always* above block |
-| list updater (uBO polls) | `curam lists update` — ETag/If-Modified-Since fetch per list into `~/.local/share/curam/lists/` |
-| cosmetic filters | (n/a for a harness) — replaced by *context scanning* (§3) |
-
-**The layered-match call in the harness:**
-
-```
-tool_call "bash setup.sh"
-  → curamsec.classify(shell_command)      # policy automaton (existing policy.py moved to Rust)
-      → "ask" (exec of repo-script signature — the injection fix)
-  → curamsec.match_host(url) if network   # trie: block / allow / ask
-      → "block" (URLhaus / StevenBlack hit)
-  → subprocess → curam-run (cage)          # boundary
+class Verdict: action, rule_id, source, source_hash, evidence
 ```
 
----
+Every verdict is a **provable chain** `{action, rule_id, source,
+source_hash, evidence}` → reproduces from the same lists + rules + list
+version. Written to the journal. This is the open-source audit property.
 
-## 2. Open-source data sources (the "databases" — all real, checked 2026)
+### Python ↔ curam-run (ndjson over stdio, versioned envelope)
 
-These play exactly the role filter lists play for uBO — they ARE the blocklist
-content, curatable, updatable, and community-maintained.
+```json
+{"id":1, "v":"cage/1", "cmd":["bash","-c","cat /etc/passwd"],
+ "cwd":"/home/x/project", "timeout_s":30,
+ "net":false, "allow_hosts":["github.com"], "deny_hosts":["evil.example"]}
+→ {"id":1, "exit":0, "stdout":"…", "cages":["bwrap:unshare-net","ipset:ru"],
+   "verdicts":[…]}
+```
 
-### Network / malicious hosts & URLs (egress deny)
-| Source | Format | Notes |
+### curamsec ↔ lists (files on disk, versioned)
+
+```
+~/.local/share/curam/lists/
+  stevenblack/  urlhaus/  gitleaks/  injection/  allow/
+  each: list.json {source_url, license, etag, sha256, refreshed_at, rev, entries}
+```
+
+`rev` is **monotonic** (rollback-proofing). `allow/` is highest-trust,
+pinned per-release, never auto-refreshed. Everything not in `allow/`
+defaults to **ask** — deny lists can only *add* denials.
+
+## 3. Libraries — finalized (no options)
+
+> Deep rationale + rejected alternatives: `docs/rust-libraries.md`.
+
+| Layer | Choice | Because |
 | --- | --- | --- |
-| [StevenBlack/hosts](https://github.com/StevenBlack/hosts) | hosts / dnsmasq | the canonical unified ad+malware host list; ideal trie source |
-| [URLhaus (abuse.ch)](https://urlhaus.abuse.ch/api) | CSV / MISP / RPZ | malicious **URLs** (not just hosts) — the "senior" egress rule feed |
-| [PhishTank](https://phishtank.org) | CSV | phishing URLs |
-| [Pi-hole blocklists](https://pi-hole.net) | lists | huge community corpus already in hosts/dnsmasq format |
+| Bindings | **maturin + PyO3** (abi3) | one command → wheel; manylinux CI; Apache-2.0 |
+| Matching | **aho-corasick** (signatures) + custom hostname trie (~100 LOC) | uBO-shaped; linear-time, SIMD |
+| Cage | **bwrap** (system tool, zero crate) for v1 | most-proven unprivileged sandbox; extrasafe (seccomp+Landlock+userns) *only if* we later embed the cage |
+| Child mgmt | **sandbox_command** | routes child through the sandbox, leaves IO to us |
+| CLI | **clap**; config via plain JSON from Python | few args; no TOML dep needed |
+| DNS | **none — no hickory** | we match *requested hostnames*, not IPs; system resolver is ground truth. See §5. |
+| Async | **none** | not a server; stdlib threads |
 
-### Package / dependency vulnerabilities (the "is this dep known-bad" check)
-| Source | Format | Notes |
+**Deliberately cut:** hickory/trust-dns, tokio, eBPF/aya, Wasm tier,
+bloom (only if >100k entries), processkit (escalator only), TUF machinery
+(a monotonic `rev` suffices).
+
+## 4. Data sources (the "databases")
+
+> uBO/Pi-hole: what they help with + their gaps: `docs/data-ipc-opensource.md` §1.
+
+| Layer | Feeds | Treatment |
 | --- | --- | --- |
-| [OSV.dev](https://osv.dev) | OSV JSON | aggregator: PyPI, npm, crates.io, GHSA, GVD — one API |
-| [RustSec advisory-db](https://github.com/rustsec/advisory-db) | OSV JSON | Rust crates exactly |
-| [GitHub Advisory DB](https://github.com/advisories) | OSV | used by dependabot; queryable |
+| Egress deny | StevenBlack (hosts), URLhaus (URLs), PhishTank | pinned snapshot + hash; tamper can only *add* denials |
+| Dev-infra **allow** | **ours**: git hosts, registries, build infra | signed per-release, pinned in-repo, never auto-refreshed |
+| Package vuln | OSV.dev, RustSec, GHSA | `check_pkg` tool the agent can call (S5) |
+| Secret/injection signatures | detect-secrets, gitleaks rules + injection datasets (prodnull, AgentInjectionBench) | aho-corasick automaton in `scan_context` |
+| **Bad skills/agents** | **no canonical DB exists** — skill trust = *our allowlist override* + optional community signature lists | a gap we can fill later; do not wait on it |
 
-### Secret / injection signatures (context scanning)
-| Source | Format | Notes |
-| --- | --- | --- |
-| [detect-secrets](https://github.com/Yelp/detect-secrets) rule set | YAML regex | secret-pattern catalogue (improves our sanitize.py) |
-| [gitleaks](https://github.com/gitleaks/gitleaks) rules | JSON | 100+ regex signatures, OSS, license-permissive |
-| [prodnull/prompt-injection-repo-dataset](https://huggingface.co/datasets/prodnull/prompt-injection-repo-dataset) | HF | indirect injections in *repo files* — exactly our Gap 1 |
-| [AgentInjectionBench](https://huggingface.co/datasets/sincpp/AgentInjectionBench) | HF | multi-step tool-use injection benchmarks |
+## 5. IP / country blocking (e.g. "block all of Russia")
 
-### "Bad skills / bad agents" — honest answer
-There is **no canonical "bad agent skill" database** yet (the space is too
-new). What exists: the Agent Skills [registry](https://agentskills.io) (an
-allowlist you can trust), and the injection datasets above as *behavioral*
-lists. The right structure is therefore **skill trust = your own allowlist
-override + optional community signature lists**, curated like uBO's
-"my filters" + community lists. This is a *gap in the ecosystem we can fill
-later*, not a wait-for-someone-else thing.
+**Not a resolver question, not in curamsec.** Country sets (100k–1M CIDRs)
+are enforced at the **network boundary** of the cage (netns + nftables/ipset
+sets via `geo-nft`/`ipset-country`) — kernel-enforced at *the actual
+connection*, no TOCTOU, O(1)-ish at scale. The harness still matches
+hostnames only; `match_host` stays string-only.
 
----
+- `block Russia` = an ipset rule on the cage's netns; `curam-run` already
+  provides the netns (`--net`). Zero extra Rust.
+- **OSS licensing caveat:** MaxMind GeoLite2 is free but **not
+  redistributable**; DB-IP Lite (CC BY 4.0) / IP2Location LITE are the
+  permissive picks. curam feeds the CIDR source to nftables; the DB never
+  lives in the repo.
 
-## 3. Libraries — options per layer (simple first)
+## 6. Feed-pull security (how we pull the lists safely)
 
-Full rationale per crate + the finalized dependency set → `docs/rust-libraries.md`. The architecture + API contracts (classify/match_host/check_pkg verdicts, curam-run ndjson, lists-on-disk) + the T1–T7 test matrix → `docs/architecture.md` (mermaid).
+> Full threat model + controls: `docs/data-ipc-opensource.md` §4.
 
-### Build / bindings
-| Option | Notes |
-| --- | --- |
-| **Maturin + PyO3** (recommended) | maturin builds+packages the wheel (abi3, cross-version); pyo3 modern (`Bound` API). `uv tool install` / pip both work. |
-| cffi (fallback) | no build on import, but manual binding for each call — more effort |
-| setuptools-rust | fine, but maturin is less ceremony |
+Most feeds can't sign their own content (StevenBlack = git repo, URLhaus =
+CSV), so the scheme is layered, not one signature. Threat model: MITM /
+DNS hijack, feed-host compromise, local cache tamper, rollback replay.
 
-### Matching engine (the uBO core)
-| Use | Crate | When |
-| --- | --- | --- |
-| signatures (secrets, injections, dangerous patterns) | **[`aho-corasick`](https://crates.io/crates/aho-corasick)** — SIMD, streaming, matches-per-byte | all |
-| hostname suffix (uBO-style trie) | small custom trie (50 LOC) or the `bm`/`regex-lite` if rules stay simple | hosts lists |
-| huge allow/deny sets | `bloom` (pre-filter) then exact | only if lists exceed ~100k |
+**The controls (in order):**
 
-### Process cage (the boundary)
-| Option | Pros |
-| --- | --- |
-| **[`extrasafe`](https://github.com/khonsulabs/extrasafe)**: unified seccomp + Landlock + user-ns | one crate, high-level, recommended start |
-| `rust-landlock` directly | lower level, kernel 5.13+ |
-| **bwrap** (system tool, not crate) | battle-tested *unprivileged* sandbox; call out to it from curam-run |
-| `systemd-run --user --scope` | *already installed* on Fedora; zero-Rust egress toggle (`PrivateNetwork`, `ProtectSystem`) |
+1. **Pin a snapshot, never poll `HEAD`.** `curam lists update <list>`
+   targets `repo@commit`/`@rev`; bumping the pin is a deliberate,
+   reviewable step. Kills feed-host-compromise.
+2. **Content-addressing + atomic swap.** Fetch into staging, verify
+   `sha256`, atomic `rename` into place. A tampered/half-downloaded list
+   never becomes visible.
+3. **Verify at load, not only at fetch.** `curamsec` checks on-disk
+   hash+signature every load. Covers offline + local cache tamper.
+4. **Monotonic `rev` = rollback-proof.** A list with `rev` ≤ last-seen is
+   rejected. One integer, no TUF.
+5. **Allow/deny asymmetry (why unsigned deny feeds are safe to consume):**
+   deny tamper = worst case a DoS; allow tamper = grants reachability. So
+   `allow/` is signed per-release + pinned; deny are pinned + hashed; and
+   "unknown ⇒ ask" means deny can never silently *grant*.
+6. **Sign the mirror, not the upstream** (later, when we publish feeds):
+   an age key held **out-of-band** (not on the agent box) signs snapshot
+   manifests. Default posture needs *no keys*: pin+hash+rev+load-verify
+   already defeat MITM, feed compromise, cache tamper, rollback.
+7. **The updater's own supply chain:** the tool that pulls feeds ships via
+   a **pinned Nix flake** (same lesson as the pi/npm audit). Update by
+   bumping the lock.
 
-### Egress
-- for the **main model HTTP**: check the provider URL with `match_host`
-  (in-process) before `urllib` opens it — that's the simple fix.
-- for **subprocess egress**: `curam-run` uses bwrap/systemd-run flags
-  (`--unshare-net` / `PrivateNetwork=yes`), no Rust networking needed.
+**Ladder:** minimum (pin+hash+atomic+load-verify+rev) ships with S0–S4;
+signing when we publish public feeds; **never** auto-refresh deny at PAR
+with no pin — that's the uBO/Pi-hole default we're deliberately not copying.
 
-### Keep simple — cut
-- NO custom DNS resolver (crates: `hickory`/`trust-dns`) — system resolver is
-  fine; we match the *requested* hostname, not the IP.
-- NO eBPF/aya audit (already cut in curam.md).
-- NO WASM/extension tier yet.
+## 7. IPC: local vs remote
 
----
+- Python ↔ curamsec: **in-process (PyO3)** — no IPC at all.
+- Python ↔ curam-run: **ndjson over stdio** — protocol testable without
+  our code (the OSS property).
+- Future daemon (supervisor/telemetry/phone bridge): **AF_UNIX +
+  JSON-RPC 2.0-style** in `$XDG_RUNTIME_DIR/curam/` (per-user, perms =
+  auth, auto-cleaned). Systemd socket activation / LSP-style.
+- **HTTP only for genuinely remote** (the phone bridge over Matrix/
+  Tailscale). Same message schema, different transport.
+- The **journal is the shared event stream** — any component tails the
+  append-only JSONL; no new transport for consumers.
 
-## 4. Build order (each step end-to-end + a test)
+## 8. Build order (each step end-to-end + tests + feed-security progress)
 
-| Step | Artifact | Proves | Test |
+Tests T1–T7 are defined in `docs/architecture.md` §3; each step lands its
+tests. Feed-pull security controls land *with* the step that first needs
+them — not bolted on later.
+
+| Step | Builds | Security requirement landed | Proves (test) |
 | --- | --- | --- | --- |
-| **S0** | maturin skeleton, `curamsec.classify("…")->allow/ask/deny` | the hybrid actually works (Rust called from Python) | `curamsec.classify("rm -rf /") == "deny"` |
-| **S1** | move policy.py rules into Rust (aho-corasick + wrapper-strip logic) | Rust is the single policy engine | eval `scenario_deny`, `scenario_pii` still pass |
-| **S2** | **the injection fix**: `bash <repo-file>` ⇒ ask (exec-of-untrusted-content signature) | the #1 documented security gap flips from leak → blocked | `run_eval --task injection_trap` PASSES |
-| **S3** | `curam-run` cage (bwrap/systemd-run) replacing raw subprocess for shell | boundary exists | a net-egress test (wget is blocked; localhost works) |
-| **S4** | egress trie: StevenBlack/URLhaus into allow/deny tries; match provider URL + cage flag | uBO-style filtering over real lists | `match_host("evil.example")=="block"`, legit hosts pass |
-| **S5** | OSV/RustSec `check_pkg(name,version)` as a tool the agent can call | supply-chain vuln lookup in-loop | offline fixture with a known-vuln package → flagged |
-| **S6** | context injection scanner (repo-file → scan before adding to context) | adversarial file loops caught statically | a planted injection in a README gets flagged before the model reads it |
+| **S0** | maturin skeleton; `curamsec` crate with `classify("…")→allow/ask/deny`, `list.json` type incl. monotonic `rev` | verify-at-load skeleton + manifest type from commit one | `classify("rm -rf /")=="deny"` (T1) |
+| **S1** | move policy.py rules into Rust (aho-corasick + wrapper-strip) | — (port must be behavior-identical) | `scenario_deny`, `scenario_pii` still pass (T2) |
+| **S2** | **the injection fix**: `bash <repo-file>` ⇒ ask (exec-of-untrusted-content signature) | — | `run_eval --task injection_trap` **PASS** (was FAIL) — closes Gap 1 |
+| **S3** | `curam-run` cage (bwrap) replacing raw subprocess; netns on/off; **geo sets (ipset/nftables) wired into the netns** | the boundary + country/IP layer exist | egress denied (`wget example.com`), localhost allowed, `rm /etc/passwd` denied, timeout→`timed_out` (T5) |
+| **S4** | `curam lists update` (pin+hash+atomic swap+load-verify+`rev`), egress tries from StevenBlack/URLhaus + our `allow/` | **feed-pull security §6 minimum** | `match_host("evil.example")=="block"`, legit hosts pass; tampered list rejected at load (T3) |
+| **S5** | OSV/RustSec `check_pkg(name, version)` as a callable tool | — | offline fixture: known-vuln package flagged, clean → `[]` (T4) |
+| **S6** | context injection scanner (repo-file → scan before context) | — | planted README injection flagged before the model reads it (becomes a T7 gate) |
+| **S7** *(later, only if we publish public feeds)* | snapshot-manifest signing (out-of-band age key), mirror | §6 item 6 | signature verify + rollback over a mirrored feed |
 
-After S2 the injection gap is *closed*; after S4 the firewall decision in
-curam.md is *implemented*; S6 is the deepest layer and can be scoped later.
+**Milestones:** after S2 the injection gap is *closed*; after S4 the curam.md
+firewall decision is *implemented* and feeds are pulled safely; S3 already
+carries the "block all of Russia" capability; S6 is the deepest layer, can be
+scoped later.
 
----
+**S0–S6 are the Go/No-Go** from `curam-evals.md`: pass S0–S4 with their
+tests and the security boundary exists in Rust while the rest stays
+proven-Python — "Rust security core + Python shell", strictly less work than
+a full rewrite.
 
-## Interfaces & licensing are in the companion doc
+## 9. What stays Python (the restraint)
 
-Data sources (uBO/Pi-hole usefulness + gaps), the IPC plan (Unix sockets +
-versioned wire protocol, not HTTP), and the open-source-first design
-principles (licensing, `proto/` contracts, provable verdicts, lists-as-data)
-live in **`docs/data-ipc-opensource.md`**. The S0–S6 build order below is
-unchanged; that doc fixes the contracts between the pieces.
+- Agent loop, journal, budget, skills, UI → frozen Python.
+- No whole-harness rewrite, no async Rust, no telemetry migration.
+- Python gains *only* call sites into `curamsec` / `curam-run`.
 
-## 5. What we deliberately keep out of Rust (the restraint)
+## 10. Open-source-first (baked in from day one)
 
-- The agent loop, journal, budget, skills, UI → stay Python (frozen).
-- No rewrite of the whole harness (this doc is the "don't" to that).
-- No moving to async Rust for shell calls (bwrap as a child is fine).
-- No telemetry layer migration (journal already the source of truth).
+> Full principles: `docs/data-ipc-opensource.md` §3.
 
-## 6. SLO note
-
-This does NOT change the Rust Go/No-Go from curam-evals.md — it *is* the
-alternative to "rewrite the whole POC in Rust." If the four security steps
-(S0–S4) pass their tests, the security boundary exists in Rust while the
-rest of the harness stays proven-Python: the "Rust rewrite" becomes the
-"Rust security core + Python shell" instead — which is strictly less work
-and keeps the working parts working.
+1. **License per artifact:** `curamsec` Apache-2.0/MIT; lists only from
+   permissive sources (never vendor URLhaus or GeoLite).
+2. **Protocol-first:** contracts above live in `proto/`, versioned,
+   reviewed like code; testable by contributors in any language (T6).
+3. **Provable verdicts:** every decision logs the full chain
+   `{verdict, rule_id, source, version, evidence}`.
+4. **Lists as data:** pinned, versioned in-repo; community PRs list
+   entries, not code.
+5. **Decoupled artifacts** (crate / binary / lists tool / harness) — each
+   standalone, each swappable.
+6. **CI + hygiene day one:** maturin wheel on GH Actions, `uv sync` for
+   dev, conventional commits, SECURITY.md, no secrets (gitleaks already
+   wired).

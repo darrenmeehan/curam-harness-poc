@@ -128,6 +128,10 @@ Linux user-ns but is a single integration test. T6 is the "contract test"
 that opens the door to contributors in other stacks. T7 is the Python-side
 gate that says the security core actually *changes* the harness behavior.
 
+> Each T lands with its build step — see the S0–S7 table in
+> `rust-security-core.md` §8 (the plan). T1=S0, T2=S1, T5=S3, T3=S4,
+> T4=S5, injection-T7=S2/S6.
+
 ---
 
 ## 4. A note on the crate-vs-tool choice (it affects the contracts)

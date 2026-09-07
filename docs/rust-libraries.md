@@ -35,7 +35,7 @@ touch the host or the network except what we allow:
 
 | Crate / tool | What it actually does | When to pick |
 |---|---|---|
-| **extrasafe** | one crate: seccomp (syscall allowlist) + Landlock (file-tree allow) + user-namespace isolation for the child | recommended — single dependency, modern API; needs Linux 5.13+ (fine: this is a Linux harness) |
+| **extrasafe** | one crate: seccomp (syscall allowlist) + Landlock (file-tree allow) + user-namespace isolation for the child | **not v1** — the plan (rust-security-core.md §3) finalizes **bwrap** first; extrasafe is the embed-the-cage opt-in only if bwrap proves limiting |
 | **rust-landlock** (direct) | Landlock only — best if we want file-tree-only and let bwrap handle namespaces | keep as an option if extrasafe proves too heavy |
 | **bwrap** (system tool, not a crate) | the battle-tested *unprivileged* container: `bwrap --unshare-net --ro-bind ... -- chroot/exec` | zero Rust; use it from `curam-run` and skip the crate entirely — the lazy option |
 | **systemd-run --user --scope** | `PrivateNetwork=yes, ProtectSystem=...` per-invocation | already on Fedora, zero deps, but tied to systemd |
