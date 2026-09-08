@@ -1,6 +1,6 @@
 # curam — Rust Security Core: the Plan
 
-**Status:** planning complete; **S0 is the next executable step**.
+**Status:** planning complete — the plan now *executes in its own repo*: `~/code/curam-security` (standalone, per the open-source decision). The bounded scope + 10 sliced stories (e01s01–e01s10, each with runnable verify commands) live in `specs/` there — see `specs/product/SCOPE_LATEST.yaml` and `specs/epics/e01-curam-security-core/`. This doc remains the architectural reference.
 **Decision (recorded in curam.md):** stop polishing the Python POC — its job
 is proven. Do NOT rewrite the whole harness in Rust. Build only the
 *security layers* in Rust and have the Python harness call them.
