@@ -9,6 +9,12 @@ Rendered copies of the same five diagrams sit beside this file:
 [d3](curam-diagrams/d3.svg) · [d4](curam-diagrams/d4.svg) ·
 [d5](curam-diagrams/d5.svg), with PNGs alongside each `.svg`.
 
+The Mermaid source for each render is checked in too, so a diagram can be
+edited and re-rendered without touching this file:
+[d1](curam-diagrams/d1.mmd) · [d2](curam-diagrams/d2.mmd) ·
+[d3](curam-diagrams/d3.mmd) · [d4](curam-diagrams/d4.mmd) ·
+[d5](curam-diagrams/d5.mmd).
+
 ## 1. Architecture Overview — POC (Python)
 
 The session journal is the hub. Everything reads from it; nothing writes back
