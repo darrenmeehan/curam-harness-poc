@@ -442,7 +442,31 @@ class Agent:
                 if not granted:
                     return {"ok": False, "denied": True, "reason": "human denied"}
 
-        return toolmod.run(self.workdir, name, args)
+        result = toolmod.run(self.workdir, name, args)
+        _journal_verdicts(self.journal, name, args, result)
+        return result
+
+
+def _journal_verdicts(journal, name: str, args: dict, result: dict) -> None:
+    """Record the cage verdict chain for the shell tool (provable audibility).
+
+    The caged `tool_shell` (tools.py) returns `verdicts` (the list of
+    {action, rule_id, source, source_hash, evidence} the cage resolved for
+    this command) and `cages` (the layers applied). Both are additive —
+    tools that aren't the cage simply don't have them, so this is a no-op
+    for read/write/edit.
+    """
+    if name != "shell" or not isinstance(result, dict):
+        return
+    payload = {"command": args.get("command", "")}
+    if "verdicts" in result and result["verdicts"]:
+        payload["verdicts"] = result["verdicts"]
+    if "cages" in result:
+        payload["cages"] = result["cages"]
+    if "timed_out" in result and result["timed_out"]:
+        payload["timed_out"] = True
+    if len(payload) > 1:
+        journal.log("tool_verdicts", payload)
 
 
 DEFAULT_CONFIG = {

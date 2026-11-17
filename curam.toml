@@ -72,3 +72,9 @@ skills_max_description_chars = 240   # lint warning above this
 skills_max_body_lines = 200          # lint warning above this
 [agent.skills]
 # (see skills.md + docs for the file format and references)
+
+
+[policy]
+[policy.rules]
+ask = ["rm", "systemctl", "sudo"]
+

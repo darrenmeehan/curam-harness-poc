@@ -10,3 +10,6 @@ eval_runs/
 *.egg-info/
 dist/
 build/
+
+# apply.sh backups (harness-wiring installs byte-identical files)
+*.bak-*

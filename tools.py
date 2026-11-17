@@ -1,12 +1,16 @@
 """Tools available to the model: read / write / edit / shell.
 
-POC stance: no sandbox. `shell` runs as the user in the configured workdir.
-The plan says exactly this — prove fluency first, put the cage in phase 2.
-Only hard rule: workdir is the cwd, and commands time out after N seconds.
+Shell runs inside the curam-run bwrap cage: system dirs are read-only, only
+the workdir + home are writable binds, net on (daily pip/git/cargo/npm needs
+it), commands time out. Fail-closed: if the cage binary is missing or the
+cage refuses a request, shell returns an error rather than silently running
+unsandboxed.
 """
 
-import subprocess
+import os
 from pathlib import Path
+
+import cage
 
 # JSON schema for each tool, sent to the provider.
 TOOL_SCHEMAS = [
@@ -173,41 +177,68 @@ def _trim(s: str | bytes | None, limit: int = MAX_OUTPUT_CHARS) -> str:
     )
 
 
+def _cage_bind(workdir: Path) -> list[str]:
+    """Writable binds: the workdir (where the agent edits) + home (where
+    git/ssh/pip/cargo keep config, caches and credentials). Everything else
+    stays read-only in the cage."""
+    home = Path.home()
+    return [f"{workdir}:{workdir}", f"{home}:{home}"]
+
+
 def tool_shell(workdir: Path, args: dict, timeout_default: int = 60) -> dict:
     cmd = args["command"]
     try:
         timeout = int(args.get("timeout") or timeout_default)
     except (TypeError, ValueError):
         timeout = timeout_default
-    try:
-        # pi-lens-ignore: python-command-injection (POC: raw shell is the point; sandbox is phase 2)
-        # pi-lens-ignore: S602 (POC: no-sandbox is the explicit stance; bwrap cage later)
-        # pi-lens-ignore: opengrep:python.lang.security.audit.subprocess-shell-true.subprocess-shell-true (POC no-sandbox; bwrap later)
-        proc = subprocess.run(
-            cmd,
-            shell=True,
-            cwd=str(workdir),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            errors="replace",
-        )
+
+    # The shell tool is the cage, not a raw subprocess. net on by default so
+    # daily agent work (pip/git/cargo/npm) keeps working; system dirs stay
+    # read-only, only workdir + home are writable binds.
+    bin_path = os.environ.get(
+        "CURAM_RUN_BIN",
+        str(Path.home() / "code/curam-security/target/debug/curam-run"),
+    )
+    gate = cage.Cage(bin_path)
+    r = gate.run(
+        ["bash", "-c", cmd],
+        cwd=workdir,
+        timeout_s=timeout,
+        net=True,
+        bind=_cage_bind(workdir),
+    )
+    if r is None:
+        # Fail closed: no cage, no unsandboxed shell. Build the binary once
+        # (cargo build --bin curam-run in ~/code/curam-security) or point
+        # CURAM_RUN_BIN at an existing build.
         return {
-            "ok": True,
-            "exit": proc.returncode,
-            "stdout": _trim(proc.stdout),
-            "stderr": _trim(proc.stderr),
+            "ok": False,
+            "error": (
+                f"curam-run unavailable at {bin_path} — shell is the cage "
+                "and refuses to run unsandboxed. Build it: "
+                "cargo build --bin curam-run (in ~/code/curam-security) "
+                "or set CURAM_RUN_BIN to an existing binary."
+            ),
         }
-    except subprocess.TimeoutExpired as e:
-        # stdout/stderr may be bytes when text=True races the timeout; decode
+    if r.get("timed_out"):
         return {
             "ok": False,
             "error": f"timed out after {timeout}s",
-            "stdout": _trim(e.stdout),
-            "stderr": _trim(e.stderr),
+            "stdout": _trim(r.get("stdout")),
+            "stderr": _trim(r.get("stderr")),
+            "timed_out": True,
+            "cages": r.get("cages", []),
+            "verdicts": r.get("verdicts", []),
         }
-    except OSError as e:
-        return {"ok": False, "error": str(e)}
+    return {
+        "ok": True,
+        "exit": r.get("exit", 1),
+        "stdout": _trim(r.get("stdout")),
+        "stderr": _trim(r.get("stderr")),
+        "timed_out": False,
+        "cages": r.get("cages", []),
+        "verdicts": r.get("verdicts", []),
+    }
 
 
 TOOLS = {
@@ -247,5 +278,12 @@ if __name__ == "__main__":
         assert s["exit"] == 0 and s["stdout"].strip() == "hi"
         bad = tool_shell(wd, {"command": "exit 3"})
         assert bad["exit"] == 3
+        # the shell tool is the cage: workdir writable, /etc read-only
+        cage_write = tool_shell(wd, {"command": "echo ok > caged.txt; cat caged.txt"})
+        assert cage_write["exit"] == 0 and cage_write["stdout"].strip() == "ok"
+        ro = tool_shell(wd, {"command": "touch /etc/passwd 2>&1; echo rc=$?"})
+        assert "rc=1" in (ro.get("stdout") or "") or "Read-only" in (
+            ro.get("stdout") or ""
+        ), ro
         assert not run(wd, "nope", {})["ok"]
-        print("tools self-check OK")
+        print("tools self-check OK (shell runs in the cage)")
