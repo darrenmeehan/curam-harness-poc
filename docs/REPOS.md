@@ -97,6 +97,20 @@ by `cargo build` fails: the sibling does not exist. You must clone
 strongest argument that the two belong in one workspace — they are already one
 build unit, just not one repository.
 
+Verified on a clean clone:
+
+```
+Unable to update /tmp/curam-security/crates/curam-core
+  failed to read .../curam-core/Cargo.toml
+  No such file or directory (os error 2)
+```
+
+`curam-harness-rs` also has no `flake.nix` of its own, so it has no devShell to
+get a toolchain from — unlike `curam-security`, which does. Building it means
+borrowing another repo's shell (`nix develop ~/code/curam-security`) or having a
+global Rust toolchain, which managed machines deliberately do not have. That is
+a second, independent reason the two belong together.
+
 ### 3b. The scrubber is duplicated, against the stated rule
 
 `curam-harness-rs/src/sanitize.rs` carries a byte-identical copy of the
