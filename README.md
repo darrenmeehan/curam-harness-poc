@@ -3,6 +3,9 @@
 Standalone repository for the curam harness. See **INSTALL.md** for setup +
 quickstart, `docs/` for the design (vision, decisions, SLOs, skills).
 
+This is one of four curam repos — see [`docs/REPOS.md`](docs/REPOS.md) for the
+whole set and why it is split.
+
 The POC proved the risky bits (full record + security findings in
 [`docs/curam-evals.md`](docs/curam-evals.md)):
 1. Can an LLM do real work through these tools **with a shell**? (fluency)
