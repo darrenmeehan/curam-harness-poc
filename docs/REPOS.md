@@ -132,7 +132,7 @@ drivers, while `curam-membrane` (binary) was the engine and lived in
 `curam-security`. The repo was renamed to `pi-curam-security` to end that.
 
 Two smaller oddities remain. The extension the repo ships is still called
-`curam-membrane-pi` (and the `curam-membrane` flag in nix-config's
+`pi-curam-security` (and the `pi-curam-security` flag in nix-config's
 `pi-config.nix` still gates it). And the repo plans drivers for `claude` and
 `codex` as well as `pi`, so the `pi-` prefix under-describes what it will hold.
 Neither is urgent; both are cheap to change while the repo is young.
