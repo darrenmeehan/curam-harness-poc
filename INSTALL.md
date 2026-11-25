@@ -14,7 +14,7 @@
 ### A. uv (recommended — installs a real `curam` binary, works from any dir)
 
 ```bash
-cd ~/code/curam/curam-harness
+cd ~/code/curam/curam-harness-poc
 uv tool install .
 # -> Installed executable: curam
 ```
@@ -30,7 +30,7 @@ curam "Add a --dry-run flag and a test for it"
 ### B. Run in place (dev checkout — needs the eval corpus)
 
 ```bash
-cd ~/code/curam/curam-harness
+cd ~/code/curam/curam-harness-poc
 python3 curam.py            # or: python3 ui.py
 ```
 
@@ -40,7 +40,7 @@ shipped with the installed wheel — they live in the repo checkout only.
 ### Reinstall after changes (dev loop)
 
 ```bash
-cd curam-harness
+cd curam-harness-poc
 uv build && uv tool install dist/*.whl --force
 ```
 
@@ -49,15 +49,15 @@ uv build && uv tool install dist/*.whl --force
 ### A. Run in place (zero install)
 
 ```bash
-git clone <this-repo-url> ~/code/curam/curam-harness
-cd ~/code/curam/curam-harness
+git clone <this-repo-url> ~/code/curam/curam-harness-poc
+cd ~/code/curam/curam-harness-poc
 python3 curam.py            # or: python3 ui.py
 ```
 
 No pip install needed. Add a shell alias:
 
 ```bash
-alias curam="python3 ~/code/curam/curam-harness/curam.py"
+alias curam="python3 ~/code/curam/curam-harness-poc/curam.py"
 ```
 
 ### B. Symlink a bin

@@ -10,12 +10,12 @@ graph, then "Known friction". The friction section is the honest part.
 
 | Repo | Role | Language | Status |
 | --- | --- | --- | --- |
-| `curam-harness` | The Python POC **and the design docs of record** | Python, stdlib-only | Frozen — proved the risky bits, not production |
+| `curam-harness-poc` | The Python POC **and the design docs of record** | Python, stdlib-only | Frozen — proved the risky bits, not production |
 | `curam-security` | The Rust security core: one library, three consumers | Rust | Active |
 | `curam-harness-rs` | The Rust harness, built on the POC's semantics | Rust | Active |
-| `curam-membrane` | The boundary engine's **drivers** (pi, and later Claude Code / Codex) | TypeScript | Active |
+| `pi-curam-security` | The boundary engine's **drivers** (pi, and later Claude Code / Codex) | TypeScript | Active |
 
-### `curam-harness` — the POC and the design of record
+### `curam-harness-poc` — the POC and the design of record
 
 The original Python harness. It answered three questions with evals
 (`docs/curam-evals.md`): can an LLM do real work through these tools with a
@@ -51,20 +51,21 @@ The POC rewritten in Rust, semantic-for-semantic. TUI (ratatui), agent loop,
 provider client, tools, journal, budget, SLI, skills. It links `curam-core`
 directly — no FFI, no duplication.
 
-### `curam-membrane` — the drivers, not the engine
+### `pi-curam-security` — the drivers, not the engine
 
-The repo name is the engine's name, but the engine lives in `curam-security`
-(`bin/curam-membrane`). This repo holds the **drivers**: thin adapters that sit
-inside a host harness (pi first) and forward tool results to the engine over
-`mem/1`. The plugin is a dumb pipe plus thin UI; all detection stays in the
-engine. `PLAN.md` here is the design for the engine's v1 surface.
+The engine lives in `curam-security` (`bin/curam-membrane`). This repo holds the
+**drivers**: thin adapters that sit inside a host harness (pi first) and forward
+tool results to the engine over `mem/1`. The plugin is a dumb pipe plus thin UI;
+all detection stays in the engine. `PLAN.md` here is the design for the engine's
+v1 surface. The repo was called `curam-membrane` until it collided with the
+engine's name — see 3c.
 
 ## 2. The dependency graph
 
 Who needs whom at build time and at run time:
 
 ```
-  curam-harness  (Python)
+  curam-harness-poc  (Python)
         |  imports the curamsec wheel      (built in curam-security)
         |  spawns  curam-run               (built in curam-security)
         v
@@ -73,7 +74,7 @@ Who needs whom at build time and at run time:
         |  ^
         |  +-- spawns curam-run
         |
-        +-- curam-membrane engine <-- stdio mem/1 --  curam-membrane  (TS drivers)
+        +-- curam-membrane engine <-- stdio mem/1 --  pi-curam-security  (TS drivers)
 ```
 
 Build order matters: `curam-security` first. The wheel and both binaries come
@@ -119,20 +120,26 @@ own header says:
 
 > anti-drift rule: ALL detection lives in curam-core
 
-and `curam-membrane/PLAN.md` §3 states the same rule in bold. The duplicate
+and `pi-curam-security/PLAN.md` §3 states the same rule in bold. The duplicate
 predates the rule being written down. `PLAN.md` §4 plans to "promote wholesale
 into `curam-core`" — the promotion happened; the harness copy was never
 deleted. Until it is, the rule is aspirational rather than enforced.
 
-### 3c. The repo name and the engine name collide
+### 3c. The repo/engine name collision (resolved)
 
-`curam-membrane` (repo) contains drivers. `curam-membrane` (binary) is the
-engine and lives in `curam-security`. A parenthetical in the driver repo's
-README is the only warning. Renaming either is cheap now and expensive later.
+This used to be the worst of the four: `curam-membrane` (repo) contained
+drivers, while `curam-membrane` (binary) was the engine and lived in
+`curam-security`. The repo was renamed to `pi-curam-security` to end that.
+
+Two smaller oddities remain. The extension the repo ships is still called
+`curam-membrane-pi` (and the `curam-membrane` flag in nix-config's
+`pi-config.nix` still gates it). And the repo plans drivers for `claude` and
+`codex` as well as `pi`, so the `pi-` prefix under-describes what it will hold.
+Neither is urgent; both are cheap to change while the repo is young.
 
 ### 3d. The design docs sit in the repo labelled least trustworthy
 
-`curam-harness/README.md` says "Not production. No sandbox — that's phase 2 on
+`curam-harness-poc/README.md` says "Not production. No sandbox — that's phase 2 on
 purpose." That is the repo whose `docs/` contains the architecture of record.
 The label is accurate for the *code* and misleading for the *documentation*.
 
@@ -150,17 +157,17 @@ and a TUI application would ship from one workspace. That is a workflow
 preference, not a technical blocker — Cargo builds per-package, so `cargo build
 -p curamsec` would not pull in the TUI.
 
-`curam-harness` (Python) — keep separate. It is frozen, it is the design of
+`curam-harness-poc` (Python) — keep separate. It is frozen, it is the design of
 record, and it consumes the core through a wheel rather than a path
 dependency. Merging it would drag a Python POC into a Rust workspace for no
 build-time benefit.
 
-`curam-membrane` (TS drivers) — keep separate. Different language, different
+`pi-curam-security` (TS drivers) — keep separate. Different language, different
 host, different release cadence. It talks to the engine over a frozen protocol,
 which is the correct boundary.
 
-**Resulting target: three repos.** `curam-harness` (Python POC + design docs),
-`curam-security` (core + engine + Rust harness), `curam-membrane` (TS drivers).
+**Resulting target: three repos.** `curam-harness-poc` (Python POC + design docs),
+`curam-security` (core + engine + Rust harness), `pi-curam-security` (TS drivers).
 
 This merge has not been performed. It is recorded here as the recommendation so
 the decision is not lost. If you disagree, change this section — that is what
@@ -170,9 +177,9 @@ it is for.
 
 | Question | File |
 | --- | --- |
-| What is curam trying to be? | `curam-harness/docs/curam.md` |
-| What does the architecture look like? | `curam-harness/docs/architecture.md`, `curam-diagrams.md` |
+| What is curam trying to be? | `curam-harness-poc/docs/curam.md` |
+| What does the architecture look like? | `curam-harness-poc/docs/architecture.md`, `curam-diagrams.md` |
 | What are the contracts? | `curam-security/proto/ndjson-spec.md` |
-| What is the Rust core plan? | `curam-harness/docs/rust-security-core.md` |
-| What is the Rust harness plan? | `curam-harness/docs/rust-harness-plan.md` |
-| What is the engine's v1 design? | `curam-membrane/PLAN.md` |
+| What is the Rust core plan? | `curam-harness-poc/docs/rust-security-core.md` |
+| What is the Rust harness plan? | `curam-harness-poc/docs/rust-harness-plan.md` |
+| What is the engine's v1 design? | `pi-curam-security/PLAN.md` |

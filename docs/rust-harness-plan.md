@@ -2,7 +2,7 @@
 
 **Status:** approved — defaults taken (Decisions §13: 1a, 2a, 3a, 4a, 5a, 6a). Implementation in progress: H0 (curam-core split), H1 (CLI + config + init + doctor), H2 (provider/SSE + budget + journal + sli), H3 (agent loop + file tools + policy + sanitize), H4 (caged shell + typed run + ask layer + fail-closed exec), H5 (streaming provider + radio TUI + REPL + Ctrl-C cancel), and H6 (skills + stage-2 classifier + report) landed.
 
-**Inputs:** Python POC (`curam-harness/`, frozen), Rust security core (`curam-security/`, e01 complete), design docs (`docs/curam.md`, `docs/architecture.md`, `docs/rust-security-core.md`, `docs/rust-libraries.md`, `docs/curam-slos.md`).
+**Inputs:** Python POC (`curam-harness-poc/`, frozen), Rust security core (`curam-security/`, e01 complete), design docs (`docs/curam.md`, `docs/architecture.md`, `docs/rust-security-core.md`, `docs/rust-libraries.md`, `docs/curam-slos.md`).
 **Goal:** a native Rust `curam` binary — the harness itself — built semantic-for-semantic on the proven POC, linking the security core as a library and the cage over the existing ndjson contract, with the UX the POC explicitly deferred to the Rust phase (real TUI, streaming, typed exec).
 
 ---
@@ -102,11 +102,11 @@ curam-harness-rs/
     report.rs           # sli + report commands (one-query-per-SLI)
     eval.rs             # eval runner over eval_tasks/ corpus
   proto/                # journal schema + ndjson contract + event types (moved/copied, versioned)
-  eval_tasks/           # vendored from curam-harness (data, unchanged)
+  eval_tasks/           # vendored from curam-harness-poc (data, unchanged)
   tests/                # integration + parity fixtures
 ```
 
-Same logic as the security-core decision: open-source-first, own issues/CI/releases, the POC repo stays frozen data. Alternative (keep as `rust/` inside `curam-harness`) is rejected for the same reasons the security core was split out — say the word if you'd rather one repo.
+Same logic as the security-core decision: open-source-first, own issues/CI/releases, the POC repo stays frozen data. Alternative (keep as `rust/` inside `curam-harness-poc`) is rejected for the same reasons the security core was split out — say the word if you'd rather one repo.
 
 ---
 
